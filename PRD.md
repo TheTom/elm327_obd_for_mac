@@ -1,273 +1,181 @@
-# PRD: FORScan Compatibility Layer for macOS (Apple Silicon)
+# PRD: Native macOS Ford Diagnostic Tool (Apple Silicon)
 
 ## 1. Overview
 
 **Goal:**
-Enable the Windows-only FORScan application to run on macOS (Apple Silicon) using Wine/CrossOver by providing a functional bridge between macOS serial devices and Windows COM port expectations.
+Build a native macOS diagnostic tool for Ford vehicles that communicates directly with ELM327 USB adapters — no Wine, no Windows, no bullshit.
 
 **Core Idea:**
-Implement a user-space serial bridge + Wine COM port mapping layer that allows FORScan to communicate with OBD adapters (e.g., ELM327) connected to macOS as if they were native Windows COM devices.
+A Rust CLI (with future SwiftUI GUI) that talks to Ford vehicle modules over CAN bus via ELM327, supporting OBD-II diagnostics, Ford-specific module scanning, DTC management, and eventually As-Built configuration.
 
 ---
 
 ## 2. Problem Statement
 
-FORScan depends on:
-- Windows COM ports (COM1, COM2, etc.)
-- Windows kernel-level serial drivers
-- Low-latency bidirectional communication
+FORScan is the gold standard for Ford diagnostics but:
+- Windows only (Wine/CrossOver is broken on Apple Silicon)
+- Closed source, no API
+- Requires license for extended features
 
-macOS:
-- exposes devices as /dev/cu.*
-- does not support Windows drivers
-- cannot natively satisfy FORScan's expectations
-
-Wine:
-- emulates Windows APIs (user space)
-- does not support kernel drivers
-- provides limited COM port mapping
-
-**Result:**
-FORScan can run under Wine, but cannot communicate with hardware.
+macOS users currently have no native option for Ford-specific diagnostics beyond basic OBD-II readers.
 
 ---
 
 ## 3. Objectives
 
 ### Primary
-- Enable FORScan to:
-  - detect a COM port
-  - open/close it
-  - send/receive serial data reliably
+- Direct serial communication with ELM327 USB adapters on macOS
+- Standard OBD-II: read/clear DTCs, live PID monitoring
+- Ford module discovery (scan all known module addresses)
+- Ford-specific DTC reading per module
 
 ### Secondary
-- Support common adapters:
-  - ELM327 (CH340, FTDI)
-- Maintain low-latency communication
-- Avoid kernel extensions (DriverKit preferred)
+- As-Built data reading (Ford configuration blocks)
+- MS-CAN support (body control modules via Protocol B)
+- Live data dashboard (RPM, speed, temps, pressures)
+- Export diagnostics to JSON/CSV
+
+### Phase 3+
+- As-Built data writing (configuration changes)
+- "Hidden features" activation (Bambi mode, global windows, etc.)
+- SwiftUI GUI
+- Homebrew installable
 
 ### Non-Goals
-- Full driver emulation
-- Perfect compatibility with all adapters
-- ECU flashing safety guarantees
+- ECU reflashing/reprogramming
+- Safety-critical writes without explicit confirmation
+- Support for non-Ford vehicles (initially)
 
 ---
 
 ## 4. System Architecture
 
-### High-Level Flow
-
 ```
-FORScan (Wine)
-   ↓
-COM Port (Wine mapping)
-   ↓
-PTY (pseudo-terminal)
-   ↓
-Bridge Service (macOS)
-   ↓
-/dev/cu.* (real USB serial device)
-   ↓
-OBD Adapter
+CLI / SwiftUI GUI
+       ↓
+  Diagnostic Engine (Rust)
+       ↓
+  ELM327 Protocol Layer
+       ↓
+  Serial Port (/dev/cu.usbserial-*)
+       ↓
+  ELM327 USB Adapter
+       ↓
+  Vehicle CAN Bus (HS-CAN / MS-CAN)
+       ↓
+  Ford Modules (PCM, BCM, ABS, APIM, IPC, ...)
 ```
 
 ---
 
 ## 5. Components
 
-### 5.1 Wine Layer
-- Runs FORScan
-- Maps COM3 → PTY device
-- Uses Wine's dosdevices mapping:
+### 5.1 Serial Layer (existing)
+- `serial.rs` — open/read/write with timeouts, 38400 8N1
+- `detect.rs` — auto-detect adapters, baud rate probing
 
-```bash
-ln -s /path/to/pty ~/.wine/dosdevices/com3
-```
+### 5.2 ELM327 Protocol Layer (new)
+- Send AT commands, parse responses
+- Wait for `>` prompt between commands
+- Handle error responses (NO DATA, UNABLE TO CONNECT, etc.)
+- Manage adapter state (echo, headers, protocol, timing)
 
-### 5.2 PTY Layer
-- Creates virtual serial endpoints
-- Allows bidirectional communication
+### 5.3 OBD-II Layer (new)
+- Standard services: Mode 01 (live data), Mode 03 (DTCs), Mode 04 (clear), Mode 09 (VIN)
+- PID decoding (RPM, speed, temps, fuel, etc.)
+- DTC decoding (P/C/B/U codes)
 
-```
-ptyA <-> ptyB
-```
+### 5.4 UDS Layer (new)
+- ISO 14229 Unified Diagnostic Services over CAN
+- DiagnosticSessionControl (0x10)
+- ReadDTCInformation (0x19)
+- ReadDataByIdentifier (0x22)
+- TesterPresent (0x3E)
+- ClearDTCs (0x14)
 
-- Wine connects to ptyA
-- Bridge connects to ptyB
+### 5.5 Ford Module Layer (new)
+- Known module address database (CAN request/response ID pairs)
+- Module scanning (send TesterPresent, collect responses)
+- Per-module DTC reading
+- As-Built data reading (Ford-specific DIDs)
 
-### 5.3 Bridge Service (Core Component)
-
-**Language:** Go / Rust / Python (initial), Rust preferred for performance
-
-**Responsibilities:**
-- Open real serial device (/dev/cu.wchusbserial*)
-- Open PTY endpoint
-- Forward data both directions:
-  - PTY → Serial
-  - Serial → PTY
-- Handle:
-  - baud rate
-  - flow control
-  - reconnect logic
-
-**Features:**
-- configurable baud rate
-- logging/debug mode
-- auto device detection
-- error handling / retries
-
-### 5.4 Device Detection Module
-- Enumerate: `/dev/cu.*`
-- Filter likely OBD devices:
-  - wchusbserial
-  - usbserial
-  - SLAB_USBtoUART
-- Optional:
-  - probe device with ATZ command
-
-### 5.5 Configuration Layer
-
-Config file (YAML/JSON):
-
-```yaml
-device: /dev/cu.wchusbserial1410
-baud_rate: 115200
-wine_com_port: COM3
-auto_reconnect: true
-logging: true
-```
+### 5.6 CLI Interface (new)
+- `ford-diag scan` — discover connected modules
+- `ford-diag dtc` — read all DTCs across all modules
+- `ford-diag dtc clear` — clear DTCs
+- `ford-diag live` — real-time PID monitoring
+- `ford-diag info` — vehicle info (VIN, calibration IDs)
+- `ford-diag asbuilt read <module>` — dump As-Built data
+- `ford-diag raw <cmd>` — send raw AT/OBD command
 
 ---
 
-## 6. Data Flow
+## 6. Target Vehicle
 
-Example interaction:
-
-1. FORScan sends: `ATZ`
-2. Wine → PTY
-3. Bridge → macOS serial
-4. Adapter responds: `ELM327 v1.5`
-5. Response flows back to FORScan
+**2017 Ford F-150 EcoBoost 3.5L V6 Twin Turbo**
+- 22 modules on HS-CAN and MS-CAN
+- PCM ID: 0x2DF7 (FORScan internal), CAN 0x7E0/0x7E8
+- ELM327 v1.5 (PIC18F25K80) at 38400 baud
+- Device: /dev/cu.usbserial-110
 
 ---
 
-## 7. Key Technical Challenges
+## 7. Implementation Phases
 
-### 7.1 Latency
-- Serial communication must be low-latency
-- Solution:
-  - non-blocking I/O
-  - buffered streams
-  - minimal processing overhead
+### Phase 1: Talk to the Truck
+- ELM327 protocol layer (init, AT commands, prompt handling)
+- Connect to adapter, configure for Ford HS-CAN
+- Read VIN (Mode 09)
+- Read basic PIDs (RPM, speed, coolant temp)
+- Read OBD-II DTCs (Mode 03)
+- Clear DTCs (Mode 04)
 
-### 7.2 COM Port Behavior
-FORScan may expect:
-- specific timeouts
-- control signals (RTS/CTS)
+### Phase 2: Ford Module Scanning
+- Module address database
+- Scan all known Ford module addresses via TesterPresent
+- Read DTCs per module (UDS 0x19)
+- Report module firmware versions
 
-Mitigation:
-- emulate minimal required behavior
-- ignore unsupported signals initially
+### Phase 3: Deep Diagnostics
+- As-Built data reading
+- MS-CAN support (Protocol B, 125 kbps)
+- Full PID database with units/scaling
+- Export to JSON/CSV
 
-### 7.3 Wine Compatibility
-- COM mapping inconsistencies
-- need stable PTY mapping
-
-### 7.4 Adapter Variability
-- CH340 vs FTDI differences
-- inconsistent firmware
-
-Mitigation:
-- test with multiple adapters
-- fallback configurations
+### Phase 4: Configuration & GUI
+- As-Built data writing (with safety confirmations)
+- SwiftUI desktop app
+- Homebrew formula
 
 ---
 
-## 8. Implementation Phases
+## 8. Success Criteria
 
-### Phase 1: Proof of Concept
-- Create PTY pair
-- Build simple byte-forwarding bridge
-- Map Wine COM → PTY
-- Verify: manual serial communication works
+Phase 1:
+- Read VIN from truck
+- Display live RPM and coolant temp
+- Read and display DTCs
+- Clear DTCs
 
-### Phase 2: FORScan Integration
-- Launch FORScan via Wine
-- Attempt connection to COM port
-- Debug:
-  - handshake issues
-  - timing problems
-
-### Phase 3: Stability
-- reconnect handling
-- logging
-- configuration system
-
-### Phase 4: Packaging
-- CLI tool
-- optional GUI wrapper
-- Homebrew installable package
+Phase 2:
+- Discover all 22 modules from the FORScan profile
+- Read DTCs from individual modules (not just OBD-II broadcast)
 
 ---
 
-## 9. Success Criteria
-- FORScan detects COM port
-- Adapter responds to basic commands:
-  - ATZ
-  - ATI
-- Stable connection for:
-  - reading codes
-  - basic diagnostics
+## 9. Hardware
+
+- **Adapter**: ELM327 USB with MS-CAN/HS-CAN toggle (CH340T, PIC18F25K80)
+- **Device path**: `/dev/cu.usbserial-110`
+- **Baud rate**: 38400 (factory default, confirmed)
+- **Vehicle**: 2017 Ford F-150 EcoBoost 3.5L
 
 ---
 
-## 10. Risks
+## 10. Existing Assets
 
-**High Risk**
-- FORScan uses unsupported Windows APIs
-- timing mismatches cause instability
-
-**Medium Risk**
-- Wine COM behavior inconsistencies
-- adapter-specific quirks
-
-**Low Risk**
-- basic serial bridging functionality
-
----
-
-## 11. Future Enhancements
-- GUI device selector
-- multi-device support
-- Bluetooth adapter support
-- protocol-level optimizations
-
----
-
-## 12. Alternatives Considered
-
-| Approach | Reason Rejected |
-|---|---|
-| File-based I/O | Not real-time |
-| macOS driver rewrite | Overkill |
-| Full Windows VM | Already exists (Parallels) |
-
----
-
-## 13. Open Questions
-- Does FORScan require non-standard serial APIs?
-- How strict are timing requirements?
-- Can Wine fully emulate required COM semantics?
-
----
-
-## Final Note
-
-This is: **a fun engineering project with a non-zero chance of working**
-
-It is not: **a reliable replacement for a $30 scanner or a proper adapter**
-
-But if you pull this off, you get:
-- native-ish Mac workflow
-- no Windows dependency
-- and the deeply satisfying feeling of beating a very dumb stack at its own game
+- `elm327-core` crate: serial, PTY, bridge, detect, config, error handling
+- `elm327-simulator`: full AT command state machine for testing
+- ELM327 Technical Reference: complete AT command set + timing
+- FORScan profile: all 22 module addresses + firmware versions
+- 78 passing tests including end-to-end simulator integration
