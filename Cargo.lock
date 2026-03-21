@@ -214,6 +214,7 @@ name = "elm327-bridge"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ctrlc",
  "elm327-core",
  "env_logger",
  "log",

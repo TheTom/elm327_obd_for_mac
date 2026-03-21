@@ -8,3 +8,4 @@ elm327-core = { path = "../elm327-core" }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
+ctrlc = "3"
