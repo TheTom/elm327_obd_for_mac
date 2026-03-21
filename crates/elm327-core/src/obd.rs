@@ -452,6 +452,164 @@ pub fn obd_command(mode: u8, pid: u8) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Ford-specific extended PIDs (Mode 22 / UDS ReadDataByIdentifier)
+// ---------------------------------------------------------------------------
+
+/// Ford-specific extended PID (Mode 22 / UDS ReadDataByIdentifier).
+///
+/// These use 2-byte Data Identifiers (DIDs) and are NOT standard OBD-II.
+/// Access via UDS service 0x22, e.g. "22033E" for desired boost pressure.
+///
+/// # Example
+/// ```
+/// use elm327_core::obd::{lookup_ford_pid, ford_did_command};
+///
+/// let pid = lookup_ford_pid(0x033E).unwrap();
+/// assert_eq!(pid.name, "Desired Boost");
+/// assert_eq!(ford_did_command(0x033E), "22033E");
+/// ```
+#[derive(Debug, Clone)]
+pub struct FordPidDef {
+    /// Data Identifier (e.g., 0x033E)
+    pub did: u16,
+    pub name: &'static str,
+    pub unit: &'static str,
+    /// Target module: PCM, BCM, TCM, etc.
+    pub module: &'static str,
+    /// Decode raw response bytes into a human-readable value
+    pub decode: fn(&[u8]) -> f64,
+}
+
+/// Ford manufacturer-specific PIDs accessible via Mode 22 (UDS ReadDataByIdentifier).
+///
+/// TODO: Add APIM (Sync module) PIDs for infotainment diagnostics
+/// TODO: Add IPC (Instrument Panel Cluster) PIDs for gauge testing
+pub static FORD_PIDS: &[FordPidDef] = &[
+    // ── PCM PIDs ──────────────────────────────────────────────────────────
+    FordPidDef {
+        did: 0x033E,
+        name: "Desired Boost",
+        unit: "PSI",
+        module: "PCM",
+        // Raw kPa to gauge PSI: (A*256+B)/128 * 0.145 - 14.7
+        decode: |d| ((d[0] as f64 * 256.0 + d[1] as f64) / 128.0 * 0.145) - 14.7,
+    },
+    FordPidDef {
+        did: 0x0462,
+        name: "Wastegate Duty Cycle",
+        unit: "%",
+        module: "PCM",
+        decode: |d| d[0] as f64 / 128.0 * 100.0,
+    },
+    FordPidDef {
+        did: 0x0461,
+        name: "Intercooler Temp",
+        unit: "\u{00B0}F",
+        module: "PCM",
+        // Ford internal units → °F
+        decode: |d| {
+            (((d[0] as f64 * 256.0 + d[1] as f64) * 0.011404134 + 9.26087) * 1.8) + 32.0
+        },
+    },
+    FordPidDef {
+        did: 0x03EC,
+        name: "Knock Retard",
+        unit: "\u{00B0}",
+        module: "PCM",
+        // Signed first byte / 2 + fractional from second byte
+        decode: |d| (d[0] as i8 as f64) / 2.0 + (d[1] as f64 / 512.0),
+    },
+    FordPidDef {
+        did: 0x03E8,
+        name: "Learned Octane Ratio",
+        unit: "ratio",
+        module: "PCM",
+        decode: |d| ((d[0] as i8 as f64) * 256.0 + d[1] as f64) / 16384.0,
+    },
+    FordPidDef {
+        did: 0x032B,
+        name: "Accelerator Pedal",
+        unit: "%",
+        module: "PCM",
+        decode: |d| d[0] as f64 / 256.0 * 100.0,
+    },
+    FordPidDef {
+        did: 0xF40F,
+        name: "IAT2 Post-Intercooler",
+        unit: "\u{00B0}F",
+        module: "PCM",
+        decode: |d| (d[0] as f64 - 40.0) * 1.8 + 32.0,
+    },
+    FordPidDef {
+        did: 0xD137,
+        name: "DTC Count",
+        unit: "count",
+        module: "PCM",
+        decode: |d| d[0] as f64,
+    },
+    // ── BCM PIDs — Tire Pressure ──────────────────────────────────────────
+    FordPidDef {
+        did: 0x2813,
+        name: "LF Tire Pressure",
+        unit: "PSI",
+        module: "BCM",
+        decode: |d| ((d[0] as f64 * 256.0 + d[1] as f64) / 3.0 + 22.0 / 3.0) * 0.145,
+    },
+    FordPidDef {
+        did: 0x2814,
+        name: "RF Tire Pressure",
+        unit: "PSI",
+        module: "BCM",
+        decode: |d| ((d[0] as f64 * 256.0 + d[1] as f64) / 3.0 + 22.0 / 3.0) * 0.145,
+    },
+    FordPidDef {
+        did: 0x2815,
+        name: "RR Tire Pressure",
+        unit: "PSI",
+        module: "BCM",
+        decode: |d| ((d[0] as f64 * 256.0 + d[1] as f64) / 3.0 + 22.0 / 3.0) * 0.145,
+    },
+    FordPidDef {
+        did: 0x2816,
+        name: "LR Tire Pressure",
+        unit: "PSI",
+        module: "BCM",
+        decode: |d| ((d[0] as f64 * 256.0 + d[1] as f64) / 3.0 + 22.0 / 3.0) * 0.145,
+    },
+    // ── TCM PIDs ──────────────────────────────────────────────────────────
+    FordPidDef {
+        did: 0x1E12,
+        name: "Current Gear",
+        unit: "gear",
+        module: "TCM",
+        decode: |d| d[0] as f64,
+    },
+    FordPidDef {
+        did: 0x1E1C,
+        name: "Trans Fluid Temp",
+        unit: "\u{00B0}F",
+        module: "TCM",
+        decode: |d| (((d[0] as i8 as f64 * 256.0) + d[1] as f64) * (9.0 / 8.0) + 320.0) / 10.0,
+    },
+];
+
+/// Look up a Ford extended PID by DID.
+pub fn lookup_ford_pid(did: u16) -> Option<&'static FordPidDef> {
+    FORD_PIDS.iter().find(|p| p.did == did)
+}
+
+/// Format a UDS ReadDataByIdentifier command for a Ford DID.
+///
+/// # Example
+/// ```
+/// use elm327_core::obd::ford_did_command;
+/// assert_eq!(ford_did_command(0x033E), "22033E");
+/// ```
+pub fn ford_did_command(did: u16) -> String {
+    format!("22{:04X}", did)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -784,5 +942,48 @@ mod tests {
         let a = find_pid(0x01, 0x05).unwrap();
         let b = lookup_pid(0x01, 0x05).unwrap();
         assert_eq!(a.name, b.name);
+    }
+
+    // ── Ford Extended PID tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_ford_pid_knock_retard_zero() {
+        let pid = lookup_ford_pid(0x03EC).unwrap();
+        // 0 knock retard = bytes [0x00, 0x00]
+        assert_eq!((pid.decode)(&[0x00, 0x00]), 0.0);
+    }
+
+    #[test]
+    fn test_ford_pid_knock_retard_negative() {
+        let pid = lookup_ford_pid(0x03EC).unwrap();
+        // -5 degrees = signed byte -10 (0xF6) / 2 + 0
+        let val = (pid.decode)(&[0xF6_u8, 0x00]);
+        assert!((val - (-5.0)).abs() < 0.1, "Expected -5.0, got {}", val);
+    }
+
+    #[test]
+    fn test_ford_pid_wastegate_duty() {
+        let pid = lookup_ford_pid(0x0462).unwrap();
+        // 50% = byte 64 (64/128*100 = 50)
+        assert!(((pid.decode)(&[64]) - 50.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_ford_pid_dtc_count() {
+        let pid = lookup_ford_pid(0xD137).unwrap();
+        assert_eq!((pid.decode)(&[3]), 3.0);
+    }
+
+    #[test]
+    fn test_ford_did_command() {
+        assert_eq!(ford_did_command(0x033E), "22033E");
+        assert_eq!(ford_did_command(0xF190), "22F190");
+    }
+
+    #[test]
+    fn test_lookup_ford_pid() {
+        assert!(lookup_ford_pid(0x033E).is_some());
+        assert!(lookup_ford_pid(0xFFFF).is_none());
+        assert_eq!(lookup_ford_pid(0x033E).unwrap().name, "Desired Boost");
     }
 }
