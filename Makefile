@@ -33,8 +33,9 @@ smoke:
 	@echo "=== Smoke test passed ==="
 
 # Testing (strict hierarchy - each level gates the next)
+# --test-threads=1 prevents PTY fd exhaustion (ERANGE) on macOS
 test:
-	cargo test --workspace
+	cargo test --workspace -- --test-threads=1
 
 test-unit:
 	cargo test --workspace --lib

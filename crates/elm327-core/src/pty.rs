@@ -60,6 +60,10 @@ mod tests {
     use super::*;
     use nix::poll::{PollFd, PollFlags, PollTimeout};
     use std::os::fd::BorrowedFd;
+    use std::sync::Mutex;
+
+    // Serialize PTY tests to avoid ERANGE from too many concurrent openpty() calls
+    static PTY_LOCK: Mutex<()> = Mutex::new(());
 
     /// Helper: poll an fd for readability with a timeout in ms.
     fn poll_readable(fd: &OwnedFd, timeout_ms: i32) -> bool {
@@ -72,6 +76,7 @@ mod tests {
 
     #[test]
     fn test_pty_create() {
+        let _lock = PTY_LOCK.lock().unwrap();
         let pair = PtyPair::create().expect("failed to create PTY pair");
         assert!(
             pair.device_path().starts_with("/dev/"),
@@ -82,6 +87,7 @@ mod tests {
 
     #[test]
     fn test_pty_roundtrip() {
+        let _lock = PTY_LOCK.lock().unwrap();
         let pair = PtyPair::create().expect("failed to create PTY pair");
 
         let msg = b"hello";
@@ -101,6 +107,7 @@ mod tests {
 
     #[test]
     fn test_pty_reverse() {
+        let _lock = PTY_LOCK.lock().unwrap();
         let pair = PtyPair::create().expect("failed to create PTY pair");
 
         let msg = b"world";
@@ -120,6 +127,7 @@ mod tests {
 
     #[test]
     fn test_pty_latency() {
+        let _lock = PTY_LOCK.lock().unwrap();
         let pair = PtyPair::create().expect("failed to create PTY pair");
 
         let msg = [0xAA_u8; 64];
