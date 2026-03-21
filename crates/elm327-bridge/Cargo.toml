@@ -1,0 +1,10 @@
+[package]
+name = "elm327-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+elm327-core = { path = "../elm327-core" }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

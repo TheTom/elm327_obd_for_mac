@@ -1,0 +1,8 @@
+# ELM327 Bridge Configuration
+device: auto                    # auto-detect or /dev/cu.wchusbserial*
+baud_rate: 38400                # ELM327 factory default
+wine_com_port: COM3
+auto_reconnect: false           # Phase 1: not implemented
+logging: true
+log_level: info
+# wine_prefix: ~/.wine          # Uncomment to override default
