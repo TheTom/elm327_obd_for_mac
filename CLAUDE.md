@@ -118,16 +118,24 @@ This project follows strict phases (see PRD.md §8). Do NOT skip ahead:
 
 - **PTY forwarding**: Target < 1ms overhead per byte-forward operation
 - **Serial I/O**: Non-blocking, buffered. Use `poll`/`select`/`epoll` (or `kqueue` on macOS)
-- **Bridge throughput**: Must sustain 115200 baud without data loss
+- **Bridge throughput**: Must sustain 38400 baud (factory default) without data loss
 - **Reconnect**: Detect device disconnect within 2s, attempt reconnect within 5s
 
 ## Known Device Patterns
 
 ```
-/dev/cu.wchusbserial*    # CH340-based ELM327 clones (most common)
-/dev/cu.usbserial*       # Generic USB-serial adapters
+/dev/cu.usbserial-*      # macOS built-in CDC driver (confirmed on Apple Silicon)
+/dev/cu.wchusbserial*    # CH340-based with WCH driver installed
 /dev/cu.SLAB_USBtoUART*  # Silicon Labs CP210x adapters
 ```
+
+### Verified Hardware (2026-03-21)
+- **Device**: ELM327 USB with MS-CAN/HS-CAN toggle (CH340T, PIC18F25K80)
+- **macOS path**: `/dev/cu.usbserial-110` (built-in CDC driver, no WCH driver needed)
+- **Baud rate**: 38400 (factory default, confirmed)
+- **Version**: ELM327 v1.5 (good PIC clone, full AT command set)
+- **ATPPS**: Full table returned (not a bad ARM clone)
+- **PP 0C**: 0x68 (non-default baud divisor stored but running at 38400)
 
 ## Common ELM327 AT Commands (Reference)
 
