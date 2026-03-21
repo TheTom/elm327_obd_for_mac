@@ -49,9 +49,7 @@ pub fn create_com_symlink(
 
 /// Remove COM port symlink from the Wine prefix.
 pub fn remove_com_symlink(wine_prefix: &Path, com_port: &str) -> Result<()> {
-    let link_path = wine_prefix
-        .join("dosdevices")
-        .join(com_port.to_lowercase());
+    let link_path = wine_prefix.join("dosdevices").join(com_port.to_lowercase());
 
     if link_path.symlink_metadata().is_ok() {
         std::fs::remove_file(&link_path).map_err(BridgeError::Io)?;

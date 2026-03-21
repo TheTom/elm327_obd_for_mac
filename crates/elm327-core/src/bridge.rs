@@ -2,7 +2,7 @@ use std::os::fd::{BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 
 use crate::error::{BridgeError, Result};
 
@@ -267,7 +267,10 @@ mod tests {
 
         // Shut it down
         shutdown.store(true, Ordering::Relaxed);
-        bridge_handle.join().expect("bridge thread panicked").expect("bridge returned error");
+        bridge_handle
+            .join()
+            .expect("bridge thread panicked")
+            .expect("bridge returned error");
     }
 
     #[test]
@@ -302,7 +305,10 @@ mod tests {
         assert_eq!(&buf[..n], msg2);
 
         shutdown.store(true, Ordering::Relaxed);
-        bridge_handle.join().expect("bridge thread panicked").expect("bridge returned error");
+        bridge_handle
+            .join()
+            .expect("bridge thread panicked")
+            .expect("bridge returned error");
     }
 
     #[test]

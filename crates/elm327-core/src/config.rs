@@ -62,9 +62,8 @@ impl Config {
         let content = std::fs::read_to_string(path).map_err(|e| {
             BridgeError::Config(format!("Failed to read {}: {}", path.display(), e))
         })?;
-        serde_yaml::from_str(&content).map_err(|e| {
-            BridgeError::Config(format!("Failed to parse {}: {}", path.display(), e))
-        })
+        serde_yaml::from_str(&content)
+            .map_err(|e| BridgeError::Config(format!("Failed to parse {}: {}", path.display(), e)))
     }
 
     /// Returns the Wine prefix path.

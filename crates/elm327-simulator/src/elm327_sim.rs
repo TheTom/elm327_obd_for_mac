@@ -32,19 +32,19 @@ const PPS_TABLE: &str = "\
 
 /// Protocol names indexed by protocol number (0-C hex).
 const PROTOCOL_NAMES: &[&str] = &[
-    "AUTO",                          // 0
-    "SAE J1850 PWM",                 // 1
-    "SAE J1850 VPW",                 // 2
-    "ISO 9141-2",                    // 3
-    "ISO 14230-4 (KWP 5BAUD)",      // 4
-    "ISO 14230-4 (KWP FAST)",       // 5
-    "ISO 15765-4 (CAN 11/500)",     // 6
-    "ISO 15765-4 (CAN 29/500)",     // 7
-    "ISO 15765-4 (CAN 11/250)",     // 8
-    "ISO 15765-4 (CAN 29/250)",     // 9
-    "SAE J1939 (CAN 29/250)",       // A
-    "USER1 CAN (11/125)",           // B
-    "USER2 CAN (11/50)",            // C
+    "AUTO",                     // 0
+    "SAE J1850 PWM",            // 1
+    "SAE J1850 VPW",            // 2
+    "ISO 9141-2",               // 3
+    "ISO 14230-4 (KWP 5BAUD)",  // 4
+    "ISO 14230-4 (KWP FAST)",   // 5
+    "ISO 15765-4 (CAN 11/500)", // 6
+    "ISO 15765-4 (CAN 29/500)", // 7
+    "ISO 15765-4 (CAN 11/250)", // 8
+    "ISO 15765-4 (CAN 29/250)", // 9
+    "SAE J1939 (CAN 29/250)",   // A
+    "USER1 CAN (11/125)",       // B
+    "USER2 CAN (11/50)",        // C
 ];
 
 pub struct Elm327Simulator {
@@ -93,8 +93,7 @@ impl Elm327Simulator {
         let upper = trimmed.to_uppercase();
 
         // Check if it's an AT command
-        if upper.starts_with("AT") {
-            let at_cmd = &upper[2..]; // strip "AT"
+        if let Some(at_cmd) = upper.strip_prefix("AT") {
             self.process_at_command(at_cmd, trimmed)
         } else {
             // Treat as OBD PID request
@@ -457,7 +456,11 @@ mod tests {
 
         let resp2 = sim.process_command("ATDPN");
         let text2 = response_text(&resp2);
-        assert!(text2.contains('6'), "ATDPN should return '6', got: {:?}", text2);
+        assert!(
+            text2.contains('6'),
+            "ATDPN should return '6', got: {:?}",
+            text2
+        );
     }
 
     #[test]

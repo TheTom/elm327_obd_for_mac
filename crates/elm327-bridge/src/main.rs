@@ -249,10 +249,7 @@ fn run_bridge(cli: Cli) -> Result<(), BridgeError> {
     let stats = bridge.stats();
     println!(
         "\nBridge stats: {} bytes PTY->Serial, {} bytes Serial->PTY, {} forwards, {} errors",
-        stats.bytes_pty_to_serial,
-        stats.bytes_serial_to_pty,
-        stats.forward_count,
-        stats.errors
+        stats.bytes_pty_to_serial, stats.bytes_serial_to_pty, stats.forward_count, stats.errors
     );
 
     // --- Cleanup: remove COM symlink ---

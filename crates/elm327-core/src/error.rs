@@ -78,10 +78,7 @@ mod tests {
         let err = BridgeError::WinePrefix {
             path: PathBuf::from("/home/user/.wine"),
         };
-        assert_eq!(
-            err.to_string(),
-            "Wine prefix not found: /home/user/.wine"
-        );
+        assert_eq!(err.to_string(), "Wine prefix not found: /home/user/.wine");
     }
 
     #[test]
@@ -101,7 +98,9 @@ mod tests {
         let nix_err = nix::Error::EPERM;
         let bridge_err: BridgeError = nix_err.into();
         assert!(matches!(bridge_err, BridgeError::PtyCreation(_)));
-        assert!(bridge_err.to_string().starts_with("PTY creation failed: EPERM"));
+        assert!(bridge_err
+            .to_string()
+            .starts_with("PTY creation failed: EPERM"));
     }
 
     #[test]

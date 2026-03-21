@@ -69,10 +69,7 @@ pub fn detect_devices() -> Vec<DetectedDevice> {
 
         // Only include known OBD-likely devices
         if device_type != DeviceType::Unknown {
-            devices.push(DetectedDevice {
-                path,
-                device_type,
-            });
+            devices.push(DetectedDevice { path, device_type });
         }
     }
 
@@ -101,10 +98,7 @@ mod tests {
 
     #[test]
     fn classify_generic_usb_serial() {
-        assert_eq!(
-            classify_device("cu.usbserial-1420"),
-            DeviceType::UsbSerial
-        );
+        assert_eq!(classify_device("cu.usbserial-1420"), DeviceType::UsbSerial);
     }
 
     #[test]
@@ -129,9 +123,6 @@ mod tests {
             path: PathBuf::from("/dev/cu.wchusbserial14340"),
             device_type: DeviceType::WchUsbSerial,
         };
-        assert_eq!(
-            dev.to_string(),
-            "/dev/cu.wchusbserial14340 (WchUsbSerial)"
-        );
+        assert_eq!(dev.to_string(), "/dev/cu.wchusbserial14340 (WchUsbSerial)");
     }
 }

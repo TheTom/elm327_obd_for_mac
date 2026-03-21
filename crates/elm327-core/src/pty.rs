@@ -25,19 +25,16 @@ impl PtyPair {
     /// println!("device at: {}", pair.device_path().display());
     /// ```
     pub fn create() -> Result<Self> {
-        let pty = nix::pty::openpty(None, None)
-            .map_err(BridgeError::PtyCreation)?;
+        let pty = nix::pty::openpty(None, None).map_err(BridgeError::PtyCreation)?;
 
         // Set raw mode so data passes through without line-discipline buffering.
         // TODO: Consider configuring baud rate for ELM327 compatibility
-        let mut attrs = termios::tcgetattr(&pty.slave)
-            .map_err(BridgeError::PtyCreation)?;
+        let mut attrs = termios::tcgetattr(&pty.slave).map_err(BridgeError::PtyCreation)?;
         termios::cfmakeraw(&mut attrs);
         termios::tcsetattr(&pty.slave, termios::SetArg::TCSANOW, &attrs)
             .map_err(BridgeError::PtyCreation)?;
 
-        let device_path = nix::unistd::ttyname(&pty.slave)
-            .map_err(BridgeError::PtyCreation)?;
+        let device_path = nix::unistd::ttyname(&pty.slave).map_err(BridgeError::PtyCreation)?;
 
         log::debug!(
             "PTY pair created: controller fd={}, device={}",
@@ -68,8 +65,8 @@ mod tests {
     fn poll_readable(fd: &OwnedFd, timeout_ms: i32) -> bool {
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd.as_raw_fd()) };
         let mut fds = [PollFd::new(borrowed, PollFlags::POLLIN)];
-        let n = nix::poll::poll(&mut fds, PollTimeout::from(timeout_ms as u16))
-            .expect("poll failed");
+        let n =
+            nix::poll::poll(&mut fds, PollTimeout::from(timeout_ms as u16)).expect("poll failed");
         n > 0
     }
 
@@ -90,7 +87,10 @@ mod tests {
         let msg = b"hello";
         nix::unistd::write(&pair.controller, msg).expect("write to controller failed");
 
-        assert!(poll_readable(&pair.device_fd, 1000), "device_fd not readable");
+        assert!(
+            poll_readable(&pair.device_fd, 1000),
+            "device_fd not readable"
+        );
 
         let mut buf = [0u8; 64];
         let n = nix::unistd::read(pair.device_fd.as_raw_fd(), &mut buf)
@@ -106,7 +106,10 @@ mod tests {
         let msg = b"world";
         nix::unistd::write(&pair.device_fd, msg).expect("write to device_fd failed");
 
-        assert!(poll_readable(&pair.controller, 1000), "controller not readable");
+        assert!(
+            poll_readable(&pair.controller, 1000),
+            "controller not readable"
+        );
 
         let mut buf = [0u8; 64];
         let n = nix::unistd::read(pair.controller.as_raw_fd(), &mut buf)
@@ -123,11 +126,13 @@ mod tests {
         let start = std::time::Instant::now();
 
         nix::unistd::write(&pair.controller, &msg).expect("write failed");
-        assert!(poll_readable(&pair.device_fd, 1000), "device_fd not readable");
+        assert!(
+            poll_readable(&pair.device_fd, 1000),
+            "device_fd not readable"
+        );
 
         let mut buf = [0u8; 64];
-        let n = nix::unistd::read(pair.device_fd.as_raw_fd(), &mut buf)
-            .expect("read failed");
+        let n = nix::unistd::read(pair.device_fd.as_raw_fd(), &mut buf).expect("read failed");
         let elapsed = start.elapsed();
 
         assert_eq!(n, 64);

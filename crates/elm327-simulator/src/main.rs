@@ -28,8 +28,7 @@ fn main() {
     // TODO: switch to elm327-core's PtyPair once it's available
     let pty = nix::pty::openpty(None, None).expect("Failed to create PTY pair");
 
-    let device_path =
-        nix::unistd::ttyname(&pty.slave).expect("Failed to get PTY device path");
+    let device_path = nix::unistd::ttyname(&pty.slave).expect("Failed to get PTY device path");
 
     // Always print the path so scripts can capture it
     println!("{}", device_path.display());
