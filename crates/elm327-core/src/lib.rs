@@ -1,3 +1,4 @@
+pub mod bridge;
 pub mod config;
 pub mod detect;
 pub mod error;
