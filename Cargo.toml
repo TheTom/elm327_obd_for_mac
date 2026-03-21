@@ -9,6 +9,7 @@ members = [
     "crates/elm327-core",
     "crates/elm327-bridge",
     "crates/elm327-simulator",
+    "crates/ford-diag",
 ]
 
 [dependencies]

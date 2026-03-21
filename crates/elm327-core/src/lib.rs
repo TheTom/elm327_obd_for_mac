@@ -1,7 +1,10 @@
 pub mod bridge;
 pub mod config;
 pub mod detect;
+pub mod elm327;
 pub mod error;
+pub mod ford;
+pub mod obd;
 pub mod pty;
 pub mod serial;
 pub mod wine;

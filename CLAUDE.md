@@ -4,35 +4,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FORScan macOS Compatibility Layer — a user-space serial bridge that enables the Windows-only FORScan OBD diagnostic tool to communicate with USB OBD adapters (ELM327) on macOS Apple Silicon via Wine/CrossOver. See `PRD.md` for full product spec.
+Native macOS Ford Diagnostic Tool — a Rust CLI that communicates directly with ELM327 USB adapters for Ford-specific OBD-II and UDS diagnostics on Apple Silicon. No Wine, no Windows. See `PRD.md` for full product spec.
 
 ## Development Commands
 
 ### **Quick Start**
 ```bash
-make smoke          # Validate environment (Wine, PTY, serial device)
-make bridge         # Start the serial bridge service
-make clean          # Kill bridge, remove PTY artifacts
+make smoke          # Validate environment (Rust, serial device)
+make build          # Build all crates
+make clean          # Cargo clean
 ```
 
 ### **Testing**
 ```bash
-make test           # Run all tests
+make test           # Run all tests (single-threaded for PTY safety)
 make test-unit      # Unit tests only (no hardware required)
 make test-pty       # PTY creation + bidirectional data flow
-make test-serial    # Serial device detection + communication (requires adapter)
-make test-bridge    # Full bridge integration (PTY ↔ serial forwarding)
-make test-wine      # Wine COM port mapping verification
-make test-e2e       # End-to-end: FORScan → COM → PTY → bridge → adapter
+make test-serial    # Serial device communication (requires adapter)
+make test-bridge    # Bridge integration (PTY ↔ serial forwarding)
+make test-e2e       # End-to-end: CLI → ELM327 → simulator
+make lint           # Clippy with -D warnings
+make fmt            # Format all code
 ```
 
-### **Development**
+### **CLI Tool**
 ```bash
-make build          # Build bridge binary
-make rebuild        # Clean + build
-make lint           # Run linter
-make fmt            # Format code
-make dev            # Build + start bridge with debug logging
+cargo run --bin ford-diag -- detect          # Find OBD adapters
+cargo run --bin ford-diag -- raw "ATZ"       # Send raw command
+cargo run --bin ford-diag -- info            # Read VIN (Phase 1)
+cargo run --bin ford-diag -- scan            # Scan Ford modules (Phase 2)
+cargo run --bin ford-diag -- dtc             # Read DTCs
+cargo run --bin ford-diag -- dtc --clear     # Clear DTCs
+cargo run --bin ford-diag -- live            # Monitor live PIDs
 ```
 
 ### **Device Utilities**
@@ -42,100 +45,110 @@ make probe          # Send ATZ to detected device, print response
 make list-ports     # List all /dev/cu.* devices
 ```
 
-## Architecture Notes
+## Architecture
 
 ### **Data Flow**
 ```
-FORScan (Wine) → COM3 (dosdevices symlink) → PTY-A ↔ PTY-B → Bridge Service → /dev/cu.* → OBD Adapter
+ford-diag CLI → Diagnostic Engine → ELM327 Protocol → Serial → /dev/cu.* → Adapter → CAN Bus → Ford Modules
 ```
 
-### **Core Components**
-- `src/bridge/` - Main bridge service: PTY ↔ serial byte forwarding
-- `src/pty/` - PTY pair creation and management
-- `src/serial/` - macOS serial device open/read/write, baud rate, flow control
-- `src/detect/` - Device enumeration and filtering (`wchusbserial`, `usbserial`, `SLAB_USBtoUART`)
-- `src/config/` - YAML config loading and validation
-- `src/wine/` - Wine dosdevices COM port symlink management
+### **Crate Structure**
+- `crates/elm327-core/` — Core library
+  - `serial.rs` — macOS serial port (38400 8N1, TTYPort with AsRawFd)
+  - `detect.rs` — Device enumeration, baud rate auto-detection
+  - `elm327.rs` — ELM327 protocol (init, send/receive, prompt handling)
+  - `obd.rs` — OBD-II (PID decoding, DTC parsing, VIN reading)
+  - `ford.rs` — Ford module database (CAN address pairs, bus mapping)
+  - `pty.rs` — PTY pair creation (used by simulator)
+  - `bridge.rs` — Byte forwarding (used by simulator tests)
+  - `config.rs` — YAML config loading
+  - `error.rs` — Unified BridgeError type
+  - `wine.rs` — Wine COM symlink management (legacy, may remove)
+- `crates/ford-diag/` — CLI binary (clap subcommands)
+- `crates/elm327-bridge/` — Bridge CLI (legacy Wine approach)
+- `crates/elm327-simulator/` — Fake ELM327 for testing without hardware
 
 ### **Configuration**
 All settings via `config.yml`:
-- **Device**: `device`, `baud_rate` (default: 115200)
-- **Wine**: `wine_com_port` (default: COM3)
-- **Behavior**: `auto_reconnect`, `logging`, `log_level`
+- **Device**: `device` (default: auto-detect), `baud_rate` (default: 38400)
+- **Behavior**: `logging`, `log_level`
 
 ## Testing Protocol
 
 ### **Test Hierarchy (strict)**
 Every PR must pass tests in this order. A failure at any level blocks the next.
 
-1. **Unit tests** — no I/O, no hardware, no Wine. Pure logic.
-2. **PTY tests** — create PTY pair, write bytes A→B and B→A, verify integrity.
-3. **Serial tests** — open real `/dev/cu.*`, send `ATZ`, expect `ELM327` response. **Skip if no adapter connected** (CI-safe).
-4. **Bridge tests** — full PTY ↔ serial forwarding. Write to PTY-A, verify it arrives on serial. Write from serial, verify it arrives on PTY-A.
-5. **Wine tests** — COM symlink exists, Wine can open the mapped port. **Skip if Wine not installed.**
-6. **E2E tests** — FORScan detects COM port, sends AT command, gets response. **Manual gate.**
+1. **Unit tests** — no I/O, no hardware. Pure logic (PID decoding, DTC parsing, config).
+2. **PTY tests** — PTY pair creation + bidirectional data flow.
+3. **Simulator tests** — full ELM327 command/response through simulator.
+4. **Bridge tests** — PTY ↔ serial forwarding via bridge.
+5. **Integration tests** — end-to-end: CLI → bridge → simulator pipeline.
+6. **Hardware tests** — real adapter communication. **Skip if no adapter** (`SKIP_HARDWARE=1`).
 
 ### **Test Rules**
-- Tests that require hardware MUST be skippable via env flag (`SKIP_HARDWARE=1`)
-- Tests that require Wine MUST be skippable via env flag (`SKIP_WINE=1`)
+- Tests that require hardware MUST be skippable via `SKIP_HARDWARE=1`
 - All tests MUST have timeouts (max 10s for unit, 30s for integration)
 - Serial tests MUST clean up device handles on exit
 - PTY tests MUST clean up file descriptors on exit
 - No test may leave orphan processes
+- Use `--test-threads=1` to prevent PTY fd exhaustion (ERANGE)
+
+### **Review Process (mandatory)**
+- Every module gets: build → test → clippy → **codex review** → commit → push
+- Codex findings are evaluated by Claude — accept real bugs, reject style nits
+- All accepted findings must be fixed before committing
+- GitHub issues track work by phase
 
 ### **What "passes" means**
-- `ATZ` → response contains `ELM327` (or adapter identifier)
-- `ATI` → response is non-empty
+- `ATZ` → response contains `ELM327`
+- PID decode: 0x0BB8 → 748 RPM (formula: (A*256+B)/4)
+- DTC decode: 0x0300 → "P0300"
+- VIN decode: multi-frame hex → 17-char ASCII string
 - PTY round-trip latency < 5ms for 64-byte payload
 - Bridge forwarding: zero data loss over 1000 round-trips
-- COM symlink resolves to valid PTY device
 
 ## Development Philosophy
 
 ### **Phase-gated work**
-This project follows strict phases (see PRD.md §8). Do NOT skip ahead:
-1. **Phase 1 (POC)**: PTY pair + byte bridge + Wine COM mapping. No config, no reconnect, no polish.
-2. **Phase 2 (Integration)**: FORScan actually talks through the bridge. Debug handshake/timing.
-3. **Phase 3 (Stability)**: Reconnect, logging, config system.
-4. **Phase 4 (Packaging)**: CLI tool, Homebrew formula.
+This project follows strict phases (see PRD.md §7). Do NOT skip ahead:
+1. **Phase 1 (Talk to the Truck)**: ELM327 protocol + OBD-II basics (VIN, PIDs, DTCs)
+2. **Phase 2 (Ford Modules)**: Module scanning, per-module DTCs, firmware versions
+3. **Phase 3 (Deep Diagnostics)**: As-Built reading, MS-CAN, full PID database
+4. **Phase 4 (Config & GUI)**: As-Built writing, SwiftUI app, Homebrew
 
 ### **Code Rules**
-- **Language**: Rust preferred. Python acceptable for prototyping only.
+- **Language**: Rust. No Python in production code.
 - **No kernel extensions**: Everything runs in user space.
 - **No unsafe unless justified**: If you write `unsafe`, add a comment explaining why.
 - **Logging**: All I/O operations MUST be loggable at debug level.
 - **Error handling**: Never silently swallow serial errors. Log + propagate.
-- **Baud rate**: Always configurable, never hardcoded.
+- **Baud rate**: Always configurable, never hardcoded (default 38400).
 - **Timeouts**: Every serial read/write MUST have a timeout. No blocking forever.
 
 ### **Hardware Safety**
 - **Never send raw bytes to the adapter without logging them first.**
-- Do not attempt ECU writes or flash operations.
-- Default to read-only diagnostic commands (AT*, 01xx PIDs).
+- Do not attempt ECU writes or flash operations without explicit user confirmation.
+- Default to read-only diagnostic commands (AT*, Mode 01/03/09).
 - If the adapter stops responding, back off — do not spam retries.
+- **NEVER toggle MS/HS-CAN switch while actively communicating.**
 
-## Performance Notes
+## Target Vehicle
 
-- **PTY forwarding**: Target < 1ms overhead per byte-forward operation
-- **Serial I/O**: Non-blocking, buffered. Use `poll`/`select`/`epoll` (or `kqueue` on macOS)
-- **Bridge throughput**: Must sustain 38400 baud (factory default) without data loss
-- **Reconnect**: Detect device disconnect within 2s, attempt reconnect within 5s
+**2017 Ford F-150 EcoBoost 3.5L V6 Twin Turbo**
+- 22 modules (20 HS-CAN, 2 MS-CAN)
+- PCM: HL3A-12A650-BBB / HL3A-12B565-GB
+- FORScan profile with full module/firmware mapping in `data/`
 
-## Known Device Patterns
+## Verified Hardware (2026-03-21)
 
 ```
-/dev/cu.usbserial-*      # macOS built-in CDC driver (confirmed on Apple Silicon)
-/dev/cu.wchusbserial*    # CH340-based with WCH driver installed
-/dev/cu.SLAB_USBtoUART*  # Silicon Labs CP210x adapters
+/dev/cu.usbserial-110    # macOS built-in CDC driver (Apple Silicon, no WCH driver needed)
 ```
 
-### Verified Hardware (2026-03-21)
-- **Device**: ELM327 USB with MS-CAN/HS-CAN toggle (CH340T, PIC18F25K80)
-- **macOS path**: `/dev/cu.usbserial-110` (built-in CDC driver, no WCH driver needed)
+- **Adapter**: ELM327 USB with MS-CAN/HS-CAN toggle (CH340T, PIC18F25K80)
 - **Baud rate**: 38400 (factory default, confirmed)
 - **Version**: ELM327 v1.5 (good PIC clone, full AT command set)
 - **ATPPS**: Full table returned (not a bad ARM clone)
-- **PP 0C**: 0x68 (non-default baud divisor stored but running at 38400)
 
 ## Common ELM327 AT Commands (Reference)
 
@@ -144,9 +157,17 @@ ATZ     → Reset, returns adapter ID (e.g., "ELM327 v1.5")
 ATI     → Adapter version info
 ATE0    → Echo off
 ATL0    → Linefeeds off
+ATH1    → Headers on (show CAN IDs in responses)
 ATS0    → Spaces off
-ATSP0   → Auto-detect OBD protocol
+ATAT1   → Adaptive timing on
+ATSP6   → Set protocol: CAN 11-bit 500kbps (Ford HS-CAN)
+ATSPB   → Set protocol: User CAN (for MS-CAN at 125kbps)
+ATSH7E0 → Set header to PCM request address
+ATCRA7E8 → Filter responses to PCM only
 0100    → Supported PIDs [01-20]
 010C    → Engine RPM
 010D    → Vehicle speed
+03      → Read DTCs
+04      → Clear DTCs
+0902    → Read VIN
 ```
