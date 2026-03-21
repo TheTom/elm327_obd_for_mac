@@ -626,4 +626,163 @@ mod tests {
         let v = (pid.decode)(&[0x38, 0xA4]);
         assert!((v - 14.5).abs() < 0.01);
     }
+
+    // ── 2017 F-150 3.5L EcoBoost ignition coil DTC tests ─────────────────
+
+    #[test]
+    fn test_decode_dtc_ignition_coil_p0351() {
+        let dtc = decode_dtc(0x03, 0x51);
+        assert_eq!(dtc.code, "P0351");
+        assert_eq!(dtc.category, DtcCategory::Powertrain);
+    }
+
+    #[test]
+    fn test_decode_dtc_ignition_coil_all_cylinders() {
+        // 3.5L EcoBoost has 6 cylinders = coils A-F (P0351-P0356)
+        let expected = vec!["P0351", "P0352", "P0353", "P0354", "P0355", "P0356"];
+        for (i, code) in expected.iter().enumerate() {
+            let pid = 0x51 + i as u8;
+            let dtc = decode_dtc(0x03, pid);
+            assert_eq!(dtc.code, *code, "Coil {} DTC mismatch", i + 1);
+        }
+    }
+
+    #[test]
+    fn test_decode_dtc_misfire_codes() {
+        // Random misfire
+        let dtc = decode_dtc(0x03, 0x00);
+        assert_eq!(dtc.code, "P0300");
+
+        // Per-cylinder misfires (6 cylinders for EcoBoost V6)
+        for cyl in 1..=6u8 {
+            let dtc = decode_dtc(0x03, cyl);
+            assert_eq!(dtc.code, format!("P030{}", cyl));
+        }
+    }
+
+    #[test]
+    fn test_decode_dtc_startup_misfire() {
+        // P0316 — misfire detected on startup (first 1000 revolutions)
+        let dtc = decode_dtc(0x03, 0x16);
+        assert_eq!(dtc.code, "P0316");
+    }
+
+    // ── EcoBoost PID decoding tests ───────────────────────────────────────
+
+    #[test]
+    fn test_decode_rpm_ecoboost_idle() {
+        // Typical EcoBoost idle: ~680 RPM
+        // Formula: (A*256 + B) / 4
+        // 680 RPM = 2720 raw = 0x0AA0
+        let pid = find_pid(0x01, 0x0C).unwrap();
+        assert_eq!((pid.decode)(&[0x0A, 0xA0]), 680.0);
+    }
+
+    #[test]
+    fn test_decode_rpm_cruising() {
+        // 2000 RPM = 8000 raw = 0x1F40
+        let pid = find_pid(0x01, 0x0C).unwrap();
+        assert_eq!((pid.decode)(&[0x1F, 0x40]), 2000.0);
+    }
+
+    #[test]
+    fn test_decode_coolant_temp_operating() {
+        // Normal operating temp: 90°C, raw = 130 (90 + 40)
+        let pid = find_pid(0x01, 0x05).unwrap();
+        assert_eq!((pid.decode)(&[130]), 90.0);
+    }
+
+    #[test]
+    fn test_decode_coolant_temp_cold_start() {
+        // Cold start: 20°C, raw = 60 (20 + 40)
+        let pid = find_pid(0x01, 0x05).unwrap();
+        assert_eq!((pid.decode)(&[60]), 20.0);
+    }
+
+    #[test]
+    fn test_decode_engine_load_full() {
+        // Full load: 100%, raw = 255
+        let pid = find_pid(0x01, 0x04).unwrap();
+        let val = (pid.decode)(&[255]);
+        assert!((val - 100.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_decode_vehicle_speed_highway() {
+        // 70 mph ~ 113 km/h
+        let pid = find_pid(0x01, 0x0D).unwrap();
+        assert_eq!((pid.decode)(&[113]), 113.0);
+    }
+
+    // ── Hex response parsing — real ELM327 formats ────────────────────────
+
+    #[test]
+    fn test_parse_response_with_header_no_spaces_supported_pids() {
+        // Headers on, spaces off: "7E8064100BE3EB813"
+        // 7E8 = CAN ID (3 hex chars), 06 = length (2 hex chars),
+        // 4100BE3EB813 = data (12 hex chars = 6 bytes)
+        let bytes = parse_hex_response("7E8064100BE3EB813");
+        assert_eq!(bytes, vec![0x41, 0x00, 0xBE, 0x3E, 0xB8, 0x13]);
+    }
+
+    #[test]
+    fn test_parse_response_no_header_with_spaces() {
+        // Headers off: "41 0C 0A A0"
+        let bytes = parse_hex_response("41 0C 0A A0");
+        assert_eq!(bytes, vec![0x41, 0x0C, 0x0A, 0xA0]);
+    }
+
+    #[test]
+    fn test_parse_dtc_response() {
+        // Mode 03 response: "43 01 03 00 00 00 00"
+        // 43 = response to mode 03, then DTC data
+        let bytes = parse_hex_response("43 01 03 00 00 00 00");
+        assert_eq!(bytes[0], 0x43); // Mode 03 response
+        let dtc = decode_dtc(bytes[2], bytes[3]);
+        assert_eq!(dtc.code, "P0300");
+    }
+
+    #[test]
+    fn test_parse_multiple_dtcs() {
+        // Multiple DTCs: "43 02 03 01 03 51 00 00"
+        // 43 = response, 02 = count
+        // 03 01 = P0301 (cylinder 1 misfire)
+        // 03 51 = P0351 (ignition coil A)
+        let bytes = parse_hex_response("43 02 03 01 03 51 00 00");
+        let dtcs = decode_dtcs(&bytes[2..]); // skip 43 and count
+        assert_eq!(dtcs.len(), 2);
+        assert_eq!(dtcs[0].code, "P0301");
+        assert_eq!(dtcs[1].code, "P0351");
+    }
+
+    // ── VIN decoding for F-150 ────────────────────────────────────────────
+
+    #[test]
+    fn test_decode_vin_f150() {
+        // VIN: 1FTEW1EGXHKC84222 (2017 F-150 format)
+        // Mode 09 PID 02 returns VIN as ASCII in multi-frame
+        // First frame has 0x49 0x02 0x01 prefix, then 17 ASCII bytes
+        let vin_str = "1FTEW1EGXHKC84222";
+        let vin_bytes: Vec<u8> = vin_str.bytes().collect();
+        // Build frames: service byte + pid + count + VIN data
+        let mut frame1 = vec![0x49, 0x02, 0x01];
+        frame1.extend_from_slice(&vin_bytes[..4]); // "1FTE"
+        let frame2 = vin_bytes[4..11].to_vec();     // "W1EGXHK"
+        let frame3 = vin_bytes[11..].to_vec();       // "C84222"
+        // Pad frame3 to make VIN extraction work (need 17 bytes total after header)
+        let vin = decode_vin(&[frame1, frame2, frame3]);
+        assert_eq!(vin, Some("1FTEW1EGXHKC84222".to_string()));
+    }
+
+    // ── find_pid alias works ──────────────────────────────────────────────
+
+    #[test]
+    fn test_find_pid_alias() {
+        assert!(find_pid(0x01, 0x0C).is_some());
+        assert!(find_pid(0x01, 0xFF).is_none());
+        // Should return same result as lookup_pid
+        let a = find_pid(0x01, 0x05).unwrap();
+        let b = lookup_pid(0x01, 0x05).unwrap();
+        assert_eq!(a.name, b.name);
+    }
 }

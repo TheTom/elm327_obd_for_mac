@@ -309,4 +309,101 @@ mod tests {
             assert!(!m.description.is_empty(), "Description must not be empty");
         }
     }
+
+    // ── 2017 F-150 specific module tests ──────────────────────────────────
+
+    #[test]
+    fn test_pcm_addresses() {
+        let pcm = find_module("PCM").unwrap();
+        assert_eq!(pcm.request_id, 0x7E0);
+        assert_eq!(pcm.response_id, 0x7E8);
+        assert_eq!(pcm.bus, CanBus::HsCan);
+    }
+
+    #[test]
+    fn test_bcm_exists() {
+        let bcm = find_module("BCM").unwrap();
+        assert_eq!(bcm.bus, CanBus::HsCan);
+    }
+
+    #[test]
+    fn test_tcm_exists() {
+        let tcm = find_module("TCM").unwrap();
+        assert_eq!(tcm.request_id, 0x7E1);
+        assert_eq!(tcm.response_id, 0x7E9);
+        assert_eq!(tcm.bus, CanBus::HsCan);
+    }
+
+    #[test]
+    fn test_all_response_ids_offset_by_8() {
+        for module in FORD_MODULES {
+            assert_eq!(
+                module.response_id,
+                module.request_id + 8,
+                "Module {} has wrong response ID offset",
+                module.abbreviation
+            );
+        }
+    }
+
+    #[test]
+    fn test_f150_has_at_least_20_modules() {
+        // The FORScan profile shows 22 modules for the 2017 F-150.
+        // We may not have exactly 22 yet, but should have at least 20.
+        assert!(
+            FORD_MODULES.len() >= 20,
+            "Expected at least 20 modules, got {}",
+            FORD_MODULES.len()
+        );
+    }
+
+    #[test]
+    fn test_hs_can_modules_majority() {
+        let hs = hs_can_modules();
+        let ms = ms_can_modules();
+        assert!(
+            hs.len() > ms.len(),
+            "HS-CAN should have more modules than MS-CAN (HS={}, MS={})",
+            hs.len(),
+            ms.len()
+        );
+    }
+
+    #[test]
+    fn test_no_duplicate_abbreviations() {
+        let mut seen = std::collections::HashSet::new();
+        for m in FORD_MODULES {
+            assert!(
+                seen.insert(m.abbreviation),
+                "Duplicate module abbreviation: {}",
+                m.abbreviation
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_request_ids() {
+        let mut seen = std::collections::HashSet::new();
+        for m in FORD_MODULES {
+            assert!(
+                seen.insert(m.request_id),
+                "Duplicate request_id 0x{:03X} for module {}",
+                m.request_id,
+                m.abbreviation
+            );
+        }
+    }
+
+    #[test]
+    fn test_critical_modules_exist() {
+        // Every 2017 F-150 should have these modules
+        let required = vec!["PCM", "TCM", "ABS", "BCM", "IPC", "RCM"];
+        for abbrev in required {
+            assert!(
+                find_module(abbrev).is_some(),
+                "Critical module {} should exist in database",
+                abbrev
+            );
+        }
+    }
 }

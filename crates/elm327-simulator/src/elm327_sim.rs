@@ -56,6 +56,8 @@ pub struct Elm327Simulator {
     adaptive_timing: u8,
     version: String,
     voltage: String,
+    /// Injected DTCs for Mode 03 simulation. Each tuple is (byte1, byte2).
+    dtcs: Vec<(u8, u8)>,
 }
 
 impl Elm327Simulator {
@@ -69,7 +71,28 @@ impl Elm327Simulator {
             adaptive_timing: 1,
             version: "ELM327 v1.5".to_string(),
             voltage: "12.6".to_string(),
+            dtcs: Vec::new(),
         }
+    }
+
+    /// Inject a DTC for Mode 03 simulation. Each DTC is two raw bytes.
+    ///
+    /// # Example
+    /// ```
+    /// use elm327_simulator::elm327_sim::Elm327Simulator;
+    /// let mut sim = Elm327Simulator::new();
+    /// sim.add_dtc(0x03, 0x01); // P0301 — cylinder 1 misfire
+    /// sim.add_dtc(0x03, 0x51); // P0351 — ignition coil A
+    /// ```
+    #[allow(dead_code)] // Used by integration tests via lib re-export
+    pub fn add_dtc(&mut self, byte1: u8, byte2: u8) {
+        self.dtcs.push((byte1, byte2));
+    }
+
+    /// Clear all injected DTCs (simulates Mode 04 clear).
+    #[allow(dead_code)] // Used by integration tests via lib re-export
+    pub fn clear_dtcs(&mut self) {
+        self.dtcs.clear();
     }
 
     /// Reset to factory defaults (ATD command).
@@ -260,7 +283,17 @@ impl Elm327Simulator {
     }
 
     /// Process a non-AT (OBD PID) command.
-    fn process_obd_command(&self, upper: &str, original: &str) -> Vec<u8> {
+    fn process_obd_command(&mut self, upper: &str, original: &str) -> Vec<u8> {
+        // Mode 03 — read stored DTCs
+        if upper == "03" {
+            return self.process_mode_03(original);
+        }
+
+        // Mode 04 — clear DTCs
+        if upper == "04" {
+            return self.process_mode_04(original);
+        }
+
         // TODO: add more realistic PID responses as needed
         let response = match upper {
             "0100" => {
@@ -287,6 +320,48 @@ impl Elm327Simulator {
             _ => "NO DATA",
         };
         self.build_response(original, response)
+    }
+
+    /// Handle Mode 03 — read stored DTCs.
+    ///
+    /// Returns "NO DATA" if no DTCs are injected, otherwise builds a proper
+    /// Mode 03 response: "43 XX DD DD DD DD ..." where XX = count, DD DD = DTC bytes.
+    fn process_mode_03(&self, original: &str) -> Vec<u8> {
+        if self.dtcs.is_empty() {
+            return self.build_response(original, "NO DATA");
+        }
+
+        // Build response: 43 (count) (dtc pairs...) padded to 6 DTC bytes (3 DTCs max per frame)
+        let count = self.dtcs.len() as u8;
+        let mut bytes = vec![0x43, count];
+        for &(b1, b2) in &self.dtcs {
+            bytes.push(b1);
+            bytes.push(b2);
+        }
+        // Pad to 3 DTC pairs (6 bytes of DTC data) with 00 00
+        while bytes.len() < 8 {
+            bytes.push(0x00);
+        }
+
+        // Format as hex string
+        let hex_str = if self.spaces {
+            bytes
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            bytes.iter().map(|b| format!("{:02X}", b)).collect()
+        };
+
+        self.build_response(original, &hex_str)
+    }
+
+    /// Handle Mode 04 — clear stored DTCs and freeze frame data.
+    fn process_mode_04(&mut self, original: &str) -> Vec<u8> {
+        self.dtcs.clear();
+        // Mode 04 positive response = 0x44
+        self.build_response(original, "44")
     }
 
     /// Build a full response with optional echo prefix and proper line endings.
@@ -597,6 +672,127 @@ mod tests {
         assert!(!sim.linefeed);
         assert!(sim.headers);
         assert!(!sim.spaces);
+    }
+
+    // ── DTC injection / Mode 03 / Mode 04 tests ─────────────────────────
+
+    #[test]
+    fn test_sim_dtc_read_no_dtcs() {
+        let mut sim = Elm327Simulator::new();
+        sim.echo = false;
+        sim.linefeed = false;
+
+        // Mode 03 with no injected DTCs should return NO DATA
+        let resp = sim.process_command("03");
+        let text = response_text(&resp);
+        assert!(
+            text.contains("NO DATA"),
+            "Mode 03 with no DTCs should return NO DATA, got: {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_sim_with_injected_misfire_dtc() {
+        let mut sim = Elm327Simulator::new();
+        sim.echo = false;
+        sim.linefeed = false;
+        sim.add_dtc(0x03, 0x01); // P0301 — cylinder 1 misfire
+        sim.add_dtc(0x03, 0x51); // P0351 — ignition coil A
+
+        let resp = sim.process_command("03");
+        let text = response_text(&resp);
+        assert!(
+            text.contains("43"),
+            "Should return Mode 03 response (0x43), got: {:?}",
+            text
+        );
+        // With spaces on (default), response should be "43 02 03 01 03 51 00 00"
+        assert!(
+            text.contains("03 01"),
+            "Should contain P0301 bytes, got: {:?}",
+            text
+        );
+        assert!(
+            text.contains("03 51"),
+            "Should contain P0351 bytes, got: {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_sim_dtc_response_no_spaces() {
+        let mut sim = Elm327Simulator::new();
+        sim.echo = false;
+        sim.linefeed = false;
+        sim.spaces = false;
+        sim.add_dtc(0x03, 0x01); // P0301
+
+        let resp = sim.process_command("03");
+        let text = response_text(&resp);
+        // No spaces: "4301030100000000" or similar
+        assert!(
+            text.contains("43"),
+            "Should contain 43 response byte, got: {:?}",
+            text
+        );
+        assert!(
+            !text.contains(" 03"),
+            "Should NOT have spaces in response, got: {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_sim_clear_dtcs() {
+        let mut sim = Elm327Simulator::new();
+        sim.echo = false;
+        sim.linefeed = false;
+        sim.add_dtc(0x03, 0x01); // P0301
+
+        // Mode 04 — clear DTCs
+        let resp = sim.process_command("04");
+        let text = response_text(&resp);
+        assert!(
+            text.contains("44"),
+            "Mode 04 should return 0x44 positive response, got: {:?}",
+            text
+        );
+
+        // Verify DTCs are cleared — Mode 03 should return NO DATA
+        let resp2 = sim.process_command("03");
+        let text2 = response_text(&resp2);
+        assert!(
+            text2.contains("NO DATA"),
+            "DTCs should be cleared after Mode 04, got: {:?}",
+            text2
+        );
+    }
+
+    #[test]
+    fn test_sim_dtc_parsed_by_obd_decoder() {
+        use elm327_core::obd::{decode_dtc, decode_dtcs, parse_hex_response};
+
+        let mut sim = Elm327Simulator::new();
+        sim.echo = false;
+        sim.linefeed = false;
+        sim.add_dtc(0x03, 0x01); // P0301
+        sim.add_dtc(0x03, 0x51); // P0351
+
+        let resp = sim.process_command("03");
+        let text = response_text(&resp);
+        // Strip the trailing prompt and whitespace to get just the hex
+        let hex_part = text.trim().trim_end_matches('>').trim();
+        let bytes = parse_hex_response(hex_part);
+
+        // bytes[0] = 0x43 (Mode 03 response)
+        // bytes[1] = count
+        // bytes[2..] = DTC pairs
+        assert_eq!(bytes[0], 0x43);
+        let dtcs = decode_dtcs(&bytes[2..]);
+        assert_eq!(dtcs.len(), 2);
+        assert_eq!(dtcs[0].code, "P0301");
+        assert_eq!(dtcs[1].code, "P0351");
     }
 
     #[test]

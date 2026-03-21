@@ -282,6 +282,28 @@ fn test_e2e_obd_pid_through_bridge() {
     assert!(start.elapsed() < TEST_TIMEOUT, "Test exceeded timeout");
 }
 
+/// Read DTCs through bridge — default simulator has no DTCs, should get NO DATA.
+#[test]
+fn test_e2e_dtc_read_through_bridge() {
+    let start = Instant::now();
+    let _harness = TestHarness::new();
+
+    // Init
+    let _ = _harness.send("ATZ");
+    let _ = _harness.send("ATE0");
+
+    // Read DTCs (Mode 03)
+    let resp = _harness.send("03");
+    let text = strip_response(&resp);
+    assert!(
+        text.contains("NO DATA"),
+        "Expected NO DATA from sim with no DTCs, got: {:?}",
+        text
+    );
+
+    assert!(start.elapsed() < TEST_TIMEOUT, "Test exceeded timeout");
+}
+
 /// Send 100 commands, verify no data corruption across the full pipeline.
 #[test]
 fn test_e2e_roundtrip_integrity() {
