@@ -298,6 +298,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "forscan-usb-obd"
+version = "0.1.0"
+dependencies = [
+ "elm327-core",
+ "elm327-simulator",
+ "env_logger",
+ "nix 0.29.0",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -358,6 +358,11 @@ impl Elm327Simulator {
                     if e.kind() == std::io::ErrorKind::Interrupted {
                         continue;
                     }
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        // Non-blocking mode: no data available, sleep briefly
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
                     return Err(e);
                 }
             }
