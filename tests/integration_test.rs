@@ -174,14 +174,22 @@ impl Drop for TestHarness {
         let borrowed = unsafe { BorrowedFd::borrow_raw(sim_device_fd) };
         let _ = nix::unistd::write(borrowed, b"\r");
 
-        // Join simulator (should see the byte, then the shutdown flag)
-        if let Some(h) = self.sim_thread.take() {
-            let _ = h.join();
-        }
-
-        // Bridge checks shutdown flag every 100ms poll cycle
+        // Join threads and check for panics.
+        // If a background thread panicked but the test itself passed, propagate the panic.
+        // Don't double-panic if we're already unwinding from a test assertion failure.
         if let Some(h) = self.bridge_thread.take() {
-            let _ = h.join();
+            if let Err(e) = h.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        }
+        if let Some(h) = self.sim_thread.take() {
+            if let Err(e) = h.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(e);
+                }
+            }
         }
     }
 }

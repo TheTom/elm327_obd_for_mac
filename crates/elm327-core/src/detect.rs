@@ -141,6 +141,13 @@ pub fn detect_devices() -> Vec<DetectedDevice> {
 pub fn probe_baud_rate(device: &str, timeout: Duration) -> Result<ProbeResult> {
     log::info!("Probing baud rate for device: {}", device);
 
+    // Track error categories to differentiate "couldn't open port" from
+    // "opened but no valid response" (Issue 4: don't collapse all errors
+    // into DeviceNotFound).
+    let mut last_error: Option<BridgeError> = None;
+    let mut had_open_failure = false;
+    let mut had_timeout = false;
+
     for &baud in BAUD_RATES {
         log::debug!("Trying {} baud on {}...", baud, device);
 
@@ -155,15 +162,30 @@ pub fn probe_baud_rate(device: &str, timeout: Duration) -> Result<ProbeResult> {
             }
             Err(e) => {
                 log::debug!("Baud {} failed for {}: {}", baud, device, e);
+                // Serial/Io errors mean we couldn't open the port (permission
+                // denied, device busy, etc.). Timeout means the port opened
+                // but we got no valid ELM response.
+                let is_open_failure = matches!(e, BridgeError::Serial(_) | BridgeError::Io(_));
+                if is_open_failure {
+                    had_open_failure = true;
+                } else {
+                    had_timeout = true;
+                }
+                last_error = Some(e);
                 continue;
             }
         }
     }
 
-    Err(BridgeError::DeviceNotFound(format!(
-        "No ELM327 response on {} at any baud rate ({:?})",
-        device, BAUD_RATES
-    )))
+    // If we never successfully opened the port at any baud rate, surface the
+    // underlying serial/IO error instead of a generic DeviceNotFound.
+    match last_error {
+        Some(err) if !had_timeout && had_open_failure => Err(err),
+        _ => Err(BridgeError::DeviceNotFound(format!(
+            "No ELM327 response on {} at any baud rate ({:?})",
+            device, BAUD_RATES
+        ))),
+    }
 }
 
 /// Try a single baud rate: open port, send ATZ, read response, check for "ELM".
@@ -180,9 +202,8 @@ fn try_baud_rate(device: &str, baud_rate: u32, timeout: Duration) -> Result<Stri
 
     let mut conn = SerialConnection::open(&config)?;
 
-    // Send ATZ (reset command)
-    conn.write(b"ATZ\r")?;
-    conn.flush()?;
+    // Send ATZ (reset command) — write_all handles flush internally
+    conn.write_all(b"ATZ\r")?;
 
     // Read response, accumulating until we hit timeout or get enough data
     let mut response = Vec::with_capacity(256);
@@ -192,11 +213,17 @@ fn try_baud_rate(device: &str, baud_rate: u32, timeout: Duration) -> Result<Stri
     while Instant::now() < deadline {
         match conn.read(&mut buf) {
             Ok(0) => {
-                // Timeout on this read cycle — check if we have a response yet
+                // Timeout on this read cycle. ELM327 adapters emit ATZ
+                // responses in chunks with gaps, so only stop reading if
+                // we've received data AND the `>` prompt indicates the
+                // response is complete. Otherwise keep reading until the
+                // deadline expires.
                 if !response.is_empty() {
-                    break;
+                    let text = String::from_utf8_lossy(&response);
+                    if text.contains('>') {
+                        break;
+                    }
                 }
-                // Otherwise keep waiting until the deadline
             }
             Ok(n) => {
                 response.extend_from_slice(&buf[..n]);

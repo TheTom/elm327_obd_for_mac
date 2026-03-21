@@ -95,7 +95,30 @@ impl SerialConnection {
         }
     }
 
+    /// Write all bytes, retrying on short writes. Logs data at debug level before sending.
+    /// Callers should prefer this over `write()` to avoid partial sends on serial devices.
+    pub fn write_all(&mut self, data: &[u8]) -> Result<()> {
+        log::debug!("Serial TX [{}]: {:?}", self.device, data);
+        let mut written = 0;
+        while written < data.len() {
+            let n = self.port.write(&data[written..]).map_err(|e| {
+                log::error!("Serial write error [{}]: {}", self.device, e);
+                BridgeError::Io(e)
+            })?;
+            if n == 0 {
+                return Err(BridgeError::Io(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "serial write returned 0 bytes",
+                )));
+            }
+            written += n;
+        }
+        self.flush()?;
+        Ok(())
+    }
+
     /// Write bytes. Logs data at debug level before sending.
+    /// NOTE: Callers should prefer `write_all()` — this can short-write on serial devices.
     pub fn write(&mut self, data: &[u8]) -> Result<usize> {
         log::debug!("Serial TX [{}]: {:?}", self.device, data);
         let n = self.port.write(data).map_err(|e| {
