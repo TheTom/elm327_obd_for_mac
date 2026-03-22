@@ -283,7 +283,10 @@ mod tests {
         assert_eq!(hs.len() + ms.len(), FORD_MODULES.len());
 
         // Sanity check known counts
-        assert!(hs.len() > ms.len(), "HS-CAN should have more modules than MS-CAN");
+        assert!(
+            hs.len() > ms.len(),
+            "HS-CAN should have more modules than MS-CAN"
+        );
         assert_eq!(ms.len(), 3, "Expected 3 MS-CAN modules");
     }
 

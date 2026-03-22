@@ -102,10 +102,7 @@ fn cmd_detect() -> elm327_core::error::Result<()> {
         println!("  {} ({:?})", dev.path.display(), dev.device_type);
 
         // Try to probe baud rate
-        match probe_baud_rate(
-            &dev.path.to_string_lossy(),
-            Duration::from_secs(2),
-        ) {
+        match probe_baud_rate(&dev.path.to_string_lossy(), Duration::from_secs(2)) {
             Ok(result) => {
                 println!("    -> {} @ {} baud", result.version, result.baud_rate);
             }
@@ -165,12 +162,16 @@ fn cmd_dtc(clear: bool, _module: Option<String>, cli: &Cli) -> elm327_core::erro
 
         println!("Current DTCs:");
         for dtc in &dtcs {
-            println!("  {} ({})", dtc.code, match dtc.category {
-                elm327_core::obd::DtcCategory::Powertrain => "Powertrain",
-                elm327_core::obd::DtcCategory::Chassis => "Chassis",
-                elm327_core::obd::DtcCategory::Body => "Body",
-                elm327_core::obd::DtcCategory::Network => "Network",
-            });
+            println!(
+                "  {} ({})",
+                dtc.code,
+                match dtc.category {
+                    elm327_core::obd::DtcCategory::Powertrain => "Powertrain",
+                    elm327_core::obd::DtcCategory::Chassis => "Chassis",
+                    elm327_core::obd::DtcCategory::Body => "Body",
+                    elm327_core::obd::DtcCategory::Network => "Network",
+                }
+            );
         }
 
         // Step 2: Confirmation prompt
@@ -207,7 +208,10 @@ fn cmd_dtc(clear: bool, _module: Option<String>, cli: &Cli) -> elm327_core::erro
         if remaining.is_empty() {
             println!("✓ Confirmed: no DTCs remaining.");
         } else {
-            println!("⚠️  {} DTC(s) still present (may be current/active faults):", remaining.len());
+            println!(
+                "⚠️  {} DTC(s) still present (may be current/active faults):",
+                remaining.len()
+            );
             for dtc in &remaining {
                 println!("  {}", dtc.code);
             }
@@ -266,7 +270,11 @@ fn parse_dtc_response(resp: &str) -> Vec<elm327_core::obd::Dtc> {
         }
 
         // Skip response byte and count, decode DTC pairs
-        let dtc_data = if bytes.len() > 2 { &bytes[2..] } else { continue };
+        let dtc_data = if bytes.len() > 2 {
+            &bytes[2..]
+        } else {
+            continue;
+        };
         let dtcs = decode_dtcs(dtc_data);
         all_dtcs.extend(dtcs);
     }
@@ -275,7 +283,11 @@ fn parse_dtc_response(resp: &str) -> Vec<elm327_core::obd::Dtc> {
 }
 
 /// Send an AT/OBD command and wait for the '>' prompt response.
-fn send_and_wait(conn: &mut SerialConnection, cmd: &str, timeout_ms: u64) -> elm327_core::error::Result<String> {
+fn send_and_wait(
+    conn: &mut SerialConnection,
+    cmd: &str,
+    timeout_ms: u64,
+) -> elm327_core::error::Result<String> {
     let cmd_bytes = format!("{}\r", cmd);
     conn.write_all(cmd_bytes.as_bytes())?;
 
@@ -369,7 +381,9 @@ fn cmd_raw(cli: &Cli, command: &str) -> elm327_core::error::Result<()> {
         if !text.is_empty() {
             eprintln!("Partial response: {}", text.trim());
         }
-        return Err(elm327_core::error::BridgeError::Timeout(Duration::from_secs(5)));
+        return Err(elm327_core::error::BridgeError::Timeout(
+            Duration::from_secs(5),
+        ));
     }
 
     // Clean up and print the response

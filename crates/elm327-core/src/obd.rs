@@ -252,10 +252,7 @@ pub fn decode_dtc(byte1: u8, byte2: u8) -> Dtc {
     let fourth = (byte2 >> 4) & 0x0F;
     let fifth = byte2 & 0x0F;
 
-    let code = format!(
-        "{}{}{:X}{:X}{:X}",
-        prefix, second, third, fourth, fifth
-    );
+    let code = format!("{}{}{:X}{:X}{:X}", prefix, second, third, fourth, fifth);
 
     Dtc { code, category }
 }
@@ -507,9 +504,7 @@ pub static FORD_PIDS: &[FordPidDef] = &[
         unit: "\u{00B0}F",
         module: "PCM",
         // Ford internal units → °F
-        decode: |d| {
-            (((d[0] as f64 * 256.0 + d[1] as f64) * 0.011404134 + 9.26087) * 1.8) + 32.0
-        },
+        decode: |d| (((d[0] as f64 * 256.0 + d[1] as f64) * 0.011404134 + 9.26087) * 1.8) + 32.0,
     },
     FordPidDef {
         did: 0x03EC,
@@ -925,9 +920,9 @@ mod tests {
         // Build frames: service byte + pid + count + VIN data
         let mut frame1 = vec![0x49, 0x02, 0x01];
         frame1.extend_from_slice(&vin_bytes[..4]); // "1FTE"
-        let frame2 = vin_bytes[4..11].to_vec();     // "W1EGXHK"
-        let frame3 = vin_bytes[11..].to_vec();       // "C84222"
-        // Pad frame3 to make VIN extraction work (need 17 bytes total after header)
+        let frame2 = vin_bytes[4..11].to_vec(); // "W1EGXHK"
+        let frame3 = vin_bytes[11..].to_vec(); // "C84222"
+                                               // Pad frame3 to make VIN extraction work (need 17 bytes total after header)
         let vin = decode_vin(&[frame1, frame2, frame3]);
         assert_eq!(vin, Some("1FTEW1EGXHKC84222".to_string()));
     }

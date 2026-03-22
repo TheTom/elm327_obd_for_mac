@@ -111,7 +111,7 @@ impl Elm327 {
 
         Ok(Self {
             conn,
-            echo: true,    // factory default: echo on
+            echo: true,     // factory default: echo on
             headers: false, // factory default: headers off
             spaces: true,   // factory default: spaces on
             protocol: 0,    // factory default: auto
@@ -236,11 +236,7 @@ impl Elm327 {
 
         let response = Response::from_lines(lines);
         if response.is_error {
-            log::warn!(
-                "ELM327 error response for '{}': {:?}",
-                cmd,
-                response.error
-            );
+            log::warn!("ELM327 error response for '{}': {:?}", cmd, response.error);
         }
 
         Ok(response)

@@ -334,8 +334,15 @@ mod tests {
     #[test]
     fn test_baud_rates_order() {
         // 38400 is the ELM327 factory default — must be tried first
-        assert_eq!(BAUD_RATES[0], 38400, "Factory default baud rate must be first");
-        assert_eq!(BAUD_RATES.len(), 5, "Should have exactly 5 baud rates to try");
+        assert_eq!(
+            BAUD_RATES[0], 38400,
+            "Factory default baud rate must be first"
+        );
+        assert_eq!(
+            BAUD_RATES.len(),
+            5,
+            "Should have exactly 5 baud rates to try"
+        );
         assert!(BAUD_RATES.contains(&115200));
         assert!(BAUD_RATES.contains(&57600));
         assert!(BAUD_RATES.contains(&9600));
@@ -350,8 +357,14 @@ mod tests {
             version: "ELM327 v1.5".to_string(),
         };
         let debug = format!("{:?}", result);
-        assert!(debug.contains("38400"), "Debug output should contain baud rate");
-        assert!(debug.contains("ELM327 v1.5"), "Debug output should contain version");
+        assert!(
+            debug.contains("38400"),
+            "Debug output should contain baud rate"
+        );
+        assert!(
+            debug.contains("ELM327 v1.5"),
+            "Debug output should contain version"
+        );
         assert!(
             debug.contains("wchusbserial14340"),
             "Debug output should contain device path"
